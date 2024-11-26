@@ -8,14 +8,20 @@ def upload_file(client_socket, file_path, file_type):
         return
     
     file_name = os.path.basename(file_path)
-    with open(file_path, "rb") as f:
-        file_content = f.read()
 
     command = f"UPLOAD|{file_name}|{file_type}"
     client_socket.send(command.encode())
     w = client_socket.recv(1024).decode()
     if w=="mande":
-        client_socket.send(file_content)
+        with open(file_path, "rb") as f:
+            while chunk := f.read(4096):  # Leer en fragmentos de 4 KB
+                client_socket.send(chunk)
+                ne=client_socket.recv(1024).decode()
+                if ne=="next":
+                    pass
+        
+        client_socket.send(b"EOF")  # Señal de fin de archivo
+
     
     response = client_socket.recv(1024).decode()
     print(f"[INFO] Respuesta del servidor: {response}")
