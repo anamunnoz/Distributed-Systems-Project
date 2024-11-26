@@ -7,13 +7,25 @@ import hashlib
 STORAGE_DIR = "server_files"
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
-# Diccionario para almacenar metadatos de archivos
+# Diccionario. para almacenar metadatos de archivos
 file_registry = {}  # {hash: [file_path_1, file_path_2]}
 
 
 def compute_hash(file_content):
     """Calcula el hash de un archivo."""
     return hashlib.sha256(file_content).hexdigest()
+
+def receive_file(client_socket, file_name):
+    """Recibe un archivo desde el cliente en fragmentos."""
+    file_path = os.path.join(STORAGE_DIR, file_name)
+    with open(file_path, "wb") as f:
+        while True:
+            chunk = client_socket.recv(4096)  # Tamaño del fragmento
+            if chunk == b"EOF":  # Señal de fin de archivo
+                break
+            f.write(chunk)
+            client_socket.send("next".encode())
+    return file_path
 
 def handle_client(client_socket, client_address):
     print(f"[INFO] Conexión establecida con {client_address}")
@@ -28,18 +40,18 @@ def handle_client(client_socket, client_address):
             if command.startswith("UPLOAD"):
                 client_socket.send("mande".encode())
                 _, file_name, file_type = command.split("|")
-                file_content = client_socket.recv(1024 * 1024)  # Recibir el archivo
-
-                file_hash = compute_hash(file_content)
+                file_path = receive_file(client_socket, file_name)
 
                 # Evitar duplicados
+                with open(file_path, 'rb') as f:
+                    file_content = f.read()
+                file_hash = compute_hash(file_content)
+                
                 if file_hash in file_registry:
                     file_registry[file_hash].append(file_name)
+                    os.remove(file_path)
                     response = f"EXISTS|{file_registry[file_hash][0]}"
                 else:
-                    file_path = os.path.join(STORAGE_DIR, file_name)
-                    with open(file_path, "wb") as f:
-                        f.write(file_content)
                     file_registry[file_hash] = [file_name]
                     response = "UPLOADED"
 
