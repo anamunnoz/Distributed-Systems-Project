@@ -26,15 +26,45 @@ def upload_file(client_socket, file_path, file_type):
     response = client_socket.recv(1024).decode()
     print(f"[INFO] Respuesta del servidor: {response}")
 
-def search_files(client_socket, search_term, file_type):
-    """Busca archivos en el servidor."""
+def search_files(client_socket):
+    """Busca archivos en el servidor y permite elegir para descargar."""
+    search_term = input("Ingrese el término de búsqueda: ")
+    file_type = input("Ingrese el tipo de archivo (* para todos): ")
     command = f"SEARCH|{search_term}|{file_type}"
     client_socket.send(command.encode())
     
-    response = client_socket.recv(1024).decode()
-    print(f"[INFO] Resultados de búsqueda:\n{response}")
+    response = client_socket.recv(4096).decode()
+    if response == "NO_RESULTS":
+        print("[INFO] No se encontraron resultados.")
+        return
+    
+    print("[INFO] Resultados de búsqueda:")
+    results = response.split("\n")
+    for line in results:
+        if line == "END_RESULTS":
+            break
+        print(line)
 
-def download_file(client_socket, file_name, save_path):
+    save_dir = input("Ingrese la ruta donde desea guardar los archivos o escriba \"EXIT\" para salir: ").strip()
+
+    if save_dir != "EXIT":
+            
+        if not os.path.isdir(save_dir):
+            print("[ERROR] La ruta proporcionada no es válida.")
+            return
+
+        # Permitir al usuario elegir archivos para descargar
+        selected_files = input(
+            "Ingrese los números de los archivos que desea descargar (separados por comas): "
+        ).split(",")
+        selected_files = [int(i.strip()) - 1 for i in selected_files if i.strip().isdigit()]
+
+        for index in selected_files:
+            if 0 <= index < len(results) - 1:
+                file_info = results[index].split(",")[0].split(": ")[1]  # Obtener nombre
+                download_file(client_socket, file_info,save_dir)
+
+def download_file(client_socket, file_name, save_dir):
     """Descarga un archivo del servidor."""
     command = f"DOWNLOAD|{file_name}"
     client_socket.send(command.encode())
@@ -45,8 +75,9 @@ def download_file(client_socket, file_name, save_path):
         _, file_type = response.split("|")
         client_socket.send(b"READY")
 
+        save_path = os.path.join(save_dir,file_name)
         # Recibir contenido y guardar
-        with open(f"{save_path}.{file_type}", 'wb') as f:
+        with open(save_path, 'wb') as f:
             while True:
                 chunk = client_socket.recv(4096)
                 if chunk == b"EOF":
@@ -66,8 +97,7 @@ def client_program(host="127.0.0.1", port=5000):
         while True:
             print("\n1. Subir archivo")
             print("2. Buscar archivo")
-            print("3. Descargar archivo")
-            print("4. Salir")
+            print("3. Salir")
             choice = input("Seleccione una opción: ")
             
             if choice == "1":
@@ -75,14 +105,8 @@ def client_program(host="127.0.0.1", port=5000):
                 file_type = input("Ingrese el tipo de archivo (txt, jpg, mp3, etc.): ")
                 upload_file(client_socket, file_path, file_type)
             elif choice == "2":
-                search_term = input("Ingrese el término de búsqueda: ")
-                file_type = input("Ingrese el tipo de archivo (* para todos): ")
-                search_files(client_socket, search_term, file_type)
+                search_files(client_socket)
             elif choice == "3":
-                file_name = input("Ingrese el nombre del archivo a descargar: ")
-                save_path = input("Ingrese la ruta donde guardar el archivo: ")
-                download_file(client_socket, file_name, save_path)
-            elif choice == "4":
                 break
             else:
                 print("[ERROR] Opción inválida.")

@@ -111,8 +111,9 @@ def handle_client(client_socket, client_address):
 
                 if results:
                     response = "\n".join(
-                        [f"Name: {r[0]}, Type: {r[1]}, Uploaded: {r[2]}" for r in results]
+                        [f"{i+1}. Name: {r[0]}, Type: {r[1]}, Uploaded: {r[2]}" for i,r in enumerate(results)]
                     )
+                    response += "\nEND_RESULTS"
                 else: 
                     response = "NO_RESULTS"
 
