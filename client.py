@@ -34,6 +34,29 @@ def search_files(client_socket, search_term, file_type):
     response = client_socket.recv(1024).decode()
     print(f"[INFO] Resultados de búsqueda:\n{response}")
 
+def download_file(client_socket, file_name, save_path):
+    """Descarga un archivo del servidor."""
+    command = f"DOWNLOAD|{file_name}"
+    client_socket.send(command.encode())
+
+    # Recibir tipo de archivo
+    response = client_socket.recv(1024).decode()
+    if response.startswith("TYPE|"):
+        _, file_type = response.split("|")
+        client_socket.send(b"READY")
+
+        # Recibir contenido y guardar
+        with open(f"{save_path}.{file_type}", 'wb') as f:
+            while True:
+                chunk = client_socket.recv(4096)
+                if chunk == b"EOF":
+                    break
+                f.write(chunk)
+                client_socket.send(b"next")  # Confirmación
+        print(f"[INFO] Archivo descargado y guardado como {save_path}.{file_type}.")
+    else:
+        print("[ERROR] Archivo no encontrado.")
+
 def client_program(host="127.0.0.1", port=5000):
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((host, port))
@@ -43,7 +66,8 @@ def client_program(host="127.0.0.1", port=5000):
         while True:
             print("\n1. Subir archivo")
             print("2. Buscar archivo")
-            print("3. Salir")
+            print("3. Descargar archivo")
+            print("4. Salir")
             choice = input("Seleccione una opción: ")
             
             if choice == "1":
@@ -55,6 +79,10 @@ def client_program(host="127.0.0.1", port=5000):
                 file_type = input("Ingrese el tipo de archivo (* para todos): ")
                 search_files(client_socket, search_term, file_type)
             elif choice == "3":
+                file_name = input("Ingrese el nombre del archivo a descargar: ")
+                save_path = input("Ingrese la ruta donde guardar el archivo: ")
+                download_file(client_socket, file_name, save_path)
+            elif choice == "4":
                 break
             else:
                 print("[ERROR] Opción inválida.")
