@@ -1,31 +1,39 @@
-import os
 import socket
 import threading
 import hashlib
+import sqlite3
+from datetime import datetime
 
-# Directorio para almacenar archivos
-STORAGE_DIR = "server_files"
-os.makedirs(STORAGE_DIR, exist_ok=True)
+# Configuración de SQLite
+DB_FILE = "server_files.db"
+conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+cursor = conn.cursor()
 
-# Diccionario. para almacenar metadatos de archivos
-file_registry = {}  # {hash: [file_path_1, file_path_2]}
+# Crear tablas si no existen
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hash TEXT UNIQUE NOT NULL,
+    content BLOB NOT NULL,
+    type TEXT NOT NULL,
+    timestamp TEXT NOT NULL
+)
+''')
 
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS file_names (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    FOREIGN KEY (file_id) REFERENCES files (id)
+)
+''')
+conn.commit()
 
 def compute_hash(file_content):
     """Calcula el hash de un archivo."""
     return hashlib.sha256(file_content).hexdigest()
 
-def receive_file(client_socket, file_name):
-    """Recibe un archivo desde el cliente en fragmentos."""
-    file_path = os.path.join(STORAGE_DIR, file_name)
-    with open(file_path, "wb") as f:
-        while True:
-            chunk = client_socket.recv(4096)  # Tamaño del fragmento
-            if chunk == b"EOF":  # Señal de fin de archivo
-                break
-            f.write(chunk)
-            client_socket.send("next".encode())
-    return file_path
 
 def handle_client(client_socket, client_address):
     print(f"[INFO] Conexión establecida con {client_address}")
@@ -40,34 +48,99 @@ def handle_client(client_socket, client_address):
             if command.startswith("UPLOAD"):
                 client_socket.send("mande".encode())
                 _, file_name, file_type = command.split("|")
-                file_path = receive_file(client_socket, file_name)
-
-                # Evitar duplicados
-                with open(file_path, 'rb') as f:
-                    file_content = f.read()
-                file_hash = compute_hash(file_content)
                 
-                if file_hash in file_registry:
-                    file_registry[file_hash].append(file_name)
-                    os.remove(file_path)
-                    response = f"EXISTS|{file_registry[file_hash][0]}"
+                # Recibir contenido del archivo
+                file_content = b""
+                while True:
+                    chunk = client_socket.recv(4096)
+                    if chunk == b"EOF":
+                        break
+                    file_content += chunk
+                    client_socket.send("next".encode())
+
+                file_hash = compute_hash(file_content)
+
+                # Verificar si el archivo ya existe
+                cursor.execute('SELECT id FROM files WHERE hash = ?', (file_hash,))
+                file_record = cursor.fetchone()
+                
+                if file_record:
+                    file_id = file_record[0]
+                    # Verificar si el nombre ya está asociado
+                    cursor.execute('SELECT name FROM file_names WHERE file_id = ? AND name = ?', (file_id, file_name))
+                    name_record = cursor.fetchone()
+
+                    if not name_record: 
+                        # Registrar el nuevo nombre
+                        cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
+                        conn.commit()
+                        response = f"ALIAS_ADDED|{file_name}"
+                    else:
+                        response = f"EXISTS|{file_name}"
+
+                    
                 else:
-                    file_registry[file_hash] = [file_name]
+                    # Registrar el nuevo archivo con su contenido binario
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    cursor.execute('INSERT INTO files (hash, content, type, timestamp) VALUES (?, ?, ?, ?)',
+                                   (file_hash, file_content, file_type, timestamp))
+                    file_id = cursor.lastrowid
+
+                    # Registrar el nombre inicial
+                    cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
+                    conn.commit()
                     response = "UPLOADED"
 
                 client_socket.send(response.encode())
             
             elif command.startswith("SEARCH"):
                 _, search_term, file_type = command.split("|")
-                results = []
+                query = '''
+                SELECT DISTINCT fn.name, f.type, f.timestamp
+                FROM files f
+                JOIN file_names fn ON f.id = fn.file_id
+                WHERE fn.name LIKE ? 
+                '''
+                params = (f"%{search_term}%",)
+                if file_type != "*":
+                    query += ' AND f.type = ?'
+                    params += (file_type,)
 
-                for file_hash, names in file_registry.items():
-                    for name in names:
-                        if (search_term in name) and (name.endswith(file_type) or file_type == "*"):
-                            results.append(name)
+                cursor.execute(query, params)
+                results = cursor.fetchall() 
 
-                response = "\n".join(results) if results else "NO_RESULTS"
+                if results:
+                    response = "\n".join(
+                        [f"Name: {r[0]}, Type: {r[1]}, Uploaded: {r[2]}" for r in results]
+                    )
+                else: 
+                    response = "NO_RESULTS"
+
                 client_socket.send(response.encode())
+
+            elif command.startswith("DOWNLOAD"):
+                _, file_name = command.split("|")
+                query = '''
+                SELECT f.content, f.type FROM files f
+                JOIN file_names fn ON f.id = fn.file_id
+                WHERE fn.name = ?
+                '''
+                cursor.execute(query, (file_name,))
+                result = cursor.fetchone()
+
+                if result:
+                    file_content, file_type = result
+                    client_socket.send(f"TYPE|{file_type}".encode())  # Enviar tipo de archivo
+                    client_socket.recv(1024)  # Confirmación
+
+                    # Enviar contenido
+                    for i in range(0, len(file_content), 4096):
+                        chunk = file_content[i:i+4096]
+                        client_socket.send(chunk)
+                        client_socket.recv(1024)  # Confirmación
+                    client_socket.send(b"EOF")
+                else:
+                    client_socket.send(b"FILE NOT FOUND")
             else:
                 client_socket.send("INVALID_COMMAND".encode())
     except Exception as e:
