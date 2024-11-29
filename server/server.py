@@ -52,7 +52,7 @@ def handle_client(client_socket, client_address):
                 # Recibir contenido del archivo
                 file_content = b""
                 while True:
-                    chunk = client_socket.recv(4096)
+                    chunk = client_socket.recv(1024000)
                     if chunk == b"EOF":
                         break
                     file_content += chunk
@@ -135,8 +135,8 @@ def handle_client(client_socket, client_address):
                     client_socket.recv(1024)  # Confirmación
 
                     # Enviar contenido
-                    for i in range(0, len(file_content), 4096):
-                        chunk = file_content[i:i+4096]
+                    for i in range(0, len(file_content), 1024000):
+                        chunk = file_content[i:i+1024000]
                         client_socket.send(chunk)
                         client_socket.recv(1024)  # Confirmación
                     client_socket.send(b"EOF")
