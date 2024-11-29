@@ -14,7 +14,7 @@ def upload_file(client_socket, file_path, file_type):
     w = client_socket.recv(1024).decode()
     if w=="mande":
         with open(file_path, "rb") as f:
-            while chunk := f.read(4096):  # Leer en fragmentos de 4 KB
+            while chunk := f.read(1024000):  # Leer en fragmentos de 1 MB
                 client_socket.send(chunk)
                 ne=client_socket.recv(1024).decode()
                 if ne=="next":
@@ -72,23 +72,22 @@ def download_file(client_socket, file_name, save_dir):
     # Recibir tipo de archivo
     response = client_socket.recv(1024).decode()
     if response.startswith("TYPE|"):
-        _, file_type = response.split("|")
         client_socket.send(b"READY")
 
         save_path = os.path.join(save_dir,file_name)
         # Recibir contenido y guardar
         with open(save_path, 'wb') as f:
             while True:
-                chunk = client_socket.recv(4096)
+                chunk = client_socket.recv(1024000)
                 if chunk == b"EOF":
                     break
                 f.write(chunk)
                 client_socket.send(b"next")  # Confirmación
-        print(f"[INFO] Archivo descargado y guardado como {save_path}.{file_type}.")
+        print(f"[INFO] Archivo descargado y guardado como {save_path}")
     else:
         print("[ERROR] Archivo no encontrado.")
 
-def client_program(host="127.0.0.1", port=5000):
+def client_program(host="10.0.11.2", port=5000):
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((host, port))
     print("[INFO] Conectado al servidor.")
