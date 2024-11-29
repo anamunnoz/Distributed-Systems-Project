@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends iproute2 && rm 
 
 # Copiar los archivos necesarios
 COPY server/server.py ./server.py
-COPY server/db/server_files.db ./db/
 COPY server/server.sh /usr/local/bin/server.sh
 
 # Asegúrate de que el script sea ejecutable

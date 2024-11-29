@@ -1,3 +1,4 @@
+import os
 import socket
 import threading
 import hashlib
@@ -6,29 +7,35 @@ from datetime import datetime
 
 # Configuración de SQLite
 DB_FILE = "server_files.db"
+db_lock = threading.Lock() #Para manejar la concurrencia en SQLite
+
+# Crear directorio de base de datos si no existe
+os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
 
 # Crear tablas si no existen
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    hash TEXT UNIQUE NOT NULL,
-    content BLOB NOT NULL,
-    type TEXT NOT NULL,
-    timestamp TEXT NOT NULL
-)
-''')
+with db_lock:
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hash TEXT UNIQUE NOT NULL,
+        content BLOB NOT NULL,
+        type TEXT NOT NULL,
+        timestamp TEXT NOT NULL
+    )
+    ''')
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS file_names (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    FOREIGN KEY (file_id) REFERENCES files (id)
-)
-''')
-conn.commit()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS file_names (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        FOREIGN KEY (file_id) REFERENCES files (id)
+    )
+    ''')
+    conn.commit()
 
 def compute_hash(file_content):
     """Calcula el hash de un archivo."""
@@ -59,37 +66,38 @@ def handle_client(client_socket, client_address):
                     client_socket.send("next".encode())
 
                 file_hash = compute_hash(file_content)
-
-                # Verificar si el archivo ya existe
-                cursor.execute('SELECT id FROM files WHERE hash = ?', (file_hash,))
-                file_record = cursor.fetchone()
                 
-                if file_record:
-                    file_id = file_record[0]
-                    # Verificar si el nombre ya está asociado
-                    cursor.execute('SELECT name FROM file_names WHERE file_id = ? AND name = ?', (file_id, file_name))
-                    name_record = cursor.fetchone()
+                with db_lock:
+                    # Verificar si el archivo ya existe
+                    cursor.execute('SELECT id FROM files WHERE hash = ?', (file_hash,))
+                    file_record = cursor.fetchone()
+                    
+                    if file_record:
+                        file_id = file_record[0]
+                        # Verificar si el nombre ya está asociado
+                        cursor.execute('SELECT name FROM file_names WHERE file_id = ? AND name = ?', (file_id, file_name))
+                        name_record = cursor.fetchone()
 
-                    if not name_record: 
-                        # Registrar el nuevo nombre
+                        if not name_record: 
+                            # Registrar el nuevo nombre
+                            cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
+                            conn.commit()
+                            response = f"ALIAS_ADDED|{file_name}"
+                        else:
+                            response = f"EXISTS|{file_name}"
+
+                        
+                    else:
+                        # Registrar el nuevo archivo con su contenido binario
+                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        cursor.execute('INSERT INTO files (hash, content, type, timestamp) VALUES (?, ?, ?, ?)',
+                                    (file_hash, file_content, file_type, timestamp))
+                        file_id = cursor.lastrowid
+
+                        # Registrar el nombre inicial
                         cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
                         conn.commit()
-                        response = f"ALIAS_ADDED|{file_name}"
-                    else:
-                        response = f"EXISTS|{file_name}"
-
-                    
-                else:
-                    # Registrar el nuevo archivo con su contenido binario
-                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    cursor.execute('INSERT INTO files (hash, content, type, timestamp) VALUES (?, ?, ?, ?)',
-                                   (file_hash, file_content, file_type, timestamp))
-                    file_id = cursor.lastrowid
-
-                    # Registrar el nombre inicial
-                    cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
-                    conn.commit()
-                    response = "UPLOADED"
+                        response = "UPLOADED"
 
                 client_socket.send(response.encode())
             
@@ -106,8 +114,9 @@ def handle_client(client_socket, client_address):
                     query += ' AND f.type = ?'
                     params += (file_type,)
 
-                cursor.execute(query, params)
-                results = cursor.fetchall() 
+                with db_lock:
+                    cursor.execute(query, params)
+                    results = cursor.fetchall() 
 
                 if results:
                     response = "\n".join(
@@ -126,8 +135,10 @@ def handle_client(client_socket, client_address):
                 JOIN file_names fn ON f.id = fn.file_id
                 WHERE fn.name = ?
                 '''
-                cursor.execute(query, (file_name,))
-                result = cursor.fetchone()
+
+                with db_lock:
+                    cursor.execute(query, (file_name,))
+                    result = cursor.fetchone()
 
                 if result:
                     file_content, file_type = result
