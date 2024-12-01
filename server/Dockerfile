@@ -1,12 +1,8 @@
 # Dockerfile para el servidor
-FROM python:3.9-slim
+FROM base
 
 # Crear directorio de trabajo
 WORKDIR /app
-
-# Instalar herramientas de red necesarias
-RUN apt-get update && apt-get install -y --no-install-recommends iproute2 && rm -rf /var/lib/apt/lists/*
-
 
 # Copiar los archivos necesarios
 COPY server/server.py ./server.py

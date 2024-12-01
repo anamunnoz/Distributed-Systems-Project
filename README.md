@@ -12,12 +12,13 @@ En esta seccion se muestran los comandos necesarios para configurar el entorno d
 - docker network create servers --subnet 10.0.11.0/24
 
 ### Crear y configurar el router:
-- docker build -t router -f router/router.Dockerfile .
+- docker build -t router -f router/Dockerfile .
 - docker run -itd --rm --name router router
 - docker network connect --ip 10.0.10.254 clients router
 - docker network connect --ip 10.0.11.254 servers router
 
 ### Crear y configurar cliente y servidor:
+- docker build -t base -f base_dockerfile/Dockerfile .
 - docker build -t client -f client/Dockerfile .
 - docker build -t server -f server/Dockerfile .
 
