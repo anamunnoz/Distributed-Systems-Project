@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime
 
 # Configuración de SQLite
-DB_FILE = "server_files.db"
+DB_FILE = "db/server_files.db"
 db_lock = threading.Lock() #Para manejar la concurrencia en SQLite
 
 # Crear directorio de base de datos si no existe
