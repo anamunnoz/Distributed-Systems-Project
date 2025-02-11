@@ -1,117 +1,91 @@
-import socket
+import asyncio
+import zmq.asyncio
 import os
 
-def upload_file(client_socket, file_path, file_type):
+async def upload_file(client_socket, command):
     """Sube un archivo al servidor."""
-    if not os.path.exists(file_path):
-        print("[ERROR] Archivo no encontrado.")
-        return
-    
-    file_name = os.path.basename(file_path)
-
-    command = f"UPLOAD|{file_name}|{file_type}"
-    client_socket.send(command.encode())
-    w = client_socket.recv(1024).decode()
-    if w=="mande":
-        with open(file_path, "rb") as f:
-            while chunk := f.read(1024000):  # Leer en fragmentos de 1 MB
-                client_socket.send(chunk)
-                ne=client_socket.recv(1024).decode()
-                if ne=="next":
-                    pass
-        
-        client_socket.send(b"EOF")  # Señal de fin de archivo
-
-    
-    response = client_socket.recv(1024).decode()
-    print(f"[INFO] Respuesta del servidor: {response}")
-
-def search_files(client_socket):
-    """Busca archivos en el servidor y permite elegir para descargar."""
-    search_term = input("Ingrese el término de búsqueda: ")
-    file_type = input("Ingrese el tipo de archivo (* para todos): ")
-    command = f"SEARCH|{search_term}|{file_type}"
-    client_socket.send(command.encode())
-    
-    response = client_socket.recv(4096).decode()
-    if response == "NO_RESULTS":
-        print("[INFO] No se encontraron resultados.")
-        return
-    
-    print("[INFO] Resultados de búsqueda:")
-    results = response.split("\n")
-    for line in results:
-        if line == "END_RESULTS":
-            break
-        print(line)
-
-    save_dir = input("Ingrese la ruta donde desea guardar los archivos o escriba \"EXIT\" para salir: ").strip()
-
-    if save_dir != "EXIT":
-            
-        if not os.path.isdir(save_dir):
-            print("[ERROR] La ruta proporcionada no es válida.")
+    try:
+        _, file_path = command.split(" ", 1)
+        if not os.path.exists(file_path):
+            print("[ERROR] Archivo no encontrado.")
             return
+        
+        file_name = os.path.basename(file_path)
+        file_type = file_name.split(".")[-1]
 
-        # Permitir al usuario elegir archivos para descargar
-        selected_files = input(
-            "Ingrese los números de los archivos que desea descargar (separados por comas): "
-        ).split(",")
-        selected_files = [int(i.strip()) - 1 for i in selected_files if i.strip().isdigit()]
+        with open(file_path, "rb") as f:
+            content = f.read()
+        message = {'action': 'subir', 'file_name': file_name, 'file_type': file_type, 'file_content': content}
+        await client_socket.send_pyobj(message)
+        answer = await client_socket.recv_string()
+        print(f"[INFO] Respuesta del servidor: {answer}")
+    except Exception as e:
+        print(f"No se pudo procesar el comando: {e}")
 
-        for index in selected_files:
-            if 0 <= index < len(results) - 1:
-                file_info = results[index].split(",")[0].split(": ")[1]  # Obtener nombre
-                download_file(client_socket, file_info,save_dir)
-
-def download_file(client_socket, file_name, save_dir):
+async def download_file(client_socket, command):
     """Descarga un archivo del servidor."""
-    command = f"DOWNLOAD|{file_name}"
-    client_socket.send(command.encode())
 
-    # Recibir tipo de archivo
-    response = client_socket.recv(1024).decode()
-    if response.startswith("TYPE|"):
-        client_socket.send(b"READY")
+    try: 
+        parts = command.split(" ")
+        if len(parts) < 2:
+            print("[ERROR] Comando inválido. Use descargar nombre [tipo]")
+            return
+        
+        file_name = parts[1]
+        file_type = parts[2] if len(parts) > 2 else "*"
+        message = {'action': 'buscar', 'file_name': file_name, 'file_type': file_type}
+        await client_socket.send_pyobj(message)
+        results = await client_socket.recv_pyobj()
 
-        save_path = os.path.join(save_dir,file_name)
-        # Recibir contenido y guardar
-        with open(save_path, 'wb') as f:
-            while True:
-                chunk = client_socket.recv(1024000)
-                if chunk == b"EOF":
-                    break
-                f.write(chunk)
-                client_socket.send(b"next")  # Confirmación
-        print(f"[INFO] Archivo descargado y guardado como {save_path}")
-    else:
-        print("[ERROR] Archivo no encontrado.")
+        if not results:
+            print("[ERROR] No se encontraron resultados.")
+            return
+        
+        print("[INFO] Resultados de búsqueda:")
 
-def client_program(host="10.0.11.2", port=5000):
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect((host, port))
+        for idx, result in enumerate(results, satrt =1):
+            print(f"{idx}. {result['name']} ({result['type']})")
+
+        selection = input("Ingrese el número del archivo a descargar: ")
+        if selection.isdigit():
+            index = int(selection) -1
+            if 0 <= index < len(results):
+                await client_socket.send_pyobj({'action': 'descargar', 'file_name': results[index]['name']})
+                file = await client_socket.recv_pyobj()
+                if 'error' in file:
+                    print(f"[ERROR] {file['error']}")
+                else:
+                    with open(file['name'], 'wb') as f:
+                        f.write(file['content'])
+                    print(f"[INFO] Archivo descargado y guardado como {file['name']}")
+            else:
+                print("[ERROR] Número de archivo inválido.")
+        else:
+            print("[ERROR] Entrada inválida. Debe ser un número.")
+    except Exception as e:
+        print(f"[ERROR] Error al descargar el archivo: {e}")
+
+
+async def client_program(host="10.0.11.2", port=5000):
+    context = zmq.asyncio.Context()
+    socket = context.socket(zmq.REQ)
+    socket.connect(f"tcp://{host}:{port}")
     print("[INFO] Conectado al servidor.")
     
     try:
         while True:
-            print("\n1. Subir archivo")
-            print("2. Buscar archivo")
-            print("3. Salir")
-            choice = input("Seleccione una opción: ")
-            
-            if choice == "1":
-                file_path = input("Ingrese la ruta del archivo: ")
-                file_type = input("Ingrese el tipo de archivo (txt, jpg, mp3, etc.): ")
-                upload_file(client_socket, file_path, file_type)
-            elif choice == "2":
-                search_files(client_socket)
-            elif choice == "3":
+            command = input("Ingrese el comando: ")
+            if command.startswith("subir"):
+                await upload_file(socket, command)
+            elif command.startswith("descargar"):
+                await download_file(socket, command)
+            elif command.startswith("salir"):
                 break
             else:
-                print("[ERROR] Opción inválida.")
+                print("[ERROR] Comando inválido.")
     finally:
-        client_socket.close()
+        socket.close()
         print("[INFO] Conexión cerrada.")
 
 if __name__ == "__main__":
-    client_program()
+    asyncio.run(client_program())
