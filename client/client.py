@@ -43,7 +43,7 @@ async def download_file(client_socket, command):
         
         print("[INFO] Resultados de búsqueda:")
 
-        for idx, result in enumerate(results, satrt =1):
+        for idx, result in enumerate(results, start =1):
             print(f"{idx}. {result['name']} ({result['type']})")
 
         selection = input("Ingrese el número del archivo a descargar: ")

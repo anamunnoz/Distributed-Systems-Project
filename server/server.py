@@ -16,25 +16,25 @@ conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
 
 # Crear tablas si no existen
-with db_lock:
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS files (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        hash TEXT UNIQUE NOT NULL,
-        content BLOB NOT NULL,
-        type TEXT NOT NULL
-    )
-    ''')
 
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS file_names (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        file_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        FOREIGN KEY (file_id) REFERENCES files (id)
-    )
-    ''')
-    conn.commit()
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hash TEXT UNIQUE NOT NULL,
+    content BLOB NOT NULL,
+    type TEXT NOT NULL
+)
+''')
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS file_names (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    FOREIGN KEY (file_id) REFERENCES files (id)
+)
+''')
+conn.commit()
 
 def compute_hash(file_content):
     """Calcula el hash de un archivo."""
