@@ -196,14 +196,22 @@ class ChordNode:
         message = f"{SEARCH_FILE},{file_name},{file_type}"
         broadcast_socket.sendto(message.encode(), (BROADCAST_ADDRESS, BROADCAST_PORT))
 
+        def handle_response(m):
+            if m.startswith("SEARCH_RESULT:"):
+                    # Formato: SEARCH_RESULT:result1,result2,...
+                    with self.lock:
+                        results.extend(eval(m.split(":")[1]))
+
         # Recibir respuestas de los nodos
         while True:
             try:
                 data, addr = broadcast_socket.recvfrom(1024)
                 response = data.decode()
-                if response.startswith("SEARCH_RESULT:"):
-                    # Formato: SEARCH_RESULT:result1,result2,...
-                    results.extend(eval(response.split(":")[1]))
+                threading.Thread(
+                    target=handle_response,
+                    args=(response,),
+                    daemon=True
+                ).start()
             except socket.timeout:
                 break  # No hay más respuestas
 
