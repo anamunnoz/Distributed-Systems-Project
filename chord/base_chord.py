@@ -199,8 +199,10 @@ class ChordNode:
         def handle_response(m):
             if m.startswith("SEARCH_RESULT:"):
                     # Formato: SEARCH_RESULT:result1,result2,...
+                    Elements=eval(m.split(":")[1])
                     with self.lock:
-                        results.extend(eval(m.split(":")[1]))
+                        for e in Elements:
+                            if e not in results: results.append(e)
 
         # Recibir respuestas de los nodos
         while True:
@@ -221,7 +223,7 @@ class ChordNode:
 
     def search_file(self, file_name, file_type):
         """Busca un archivo en la base de datos."""
-        query = '''SELECT DISTINCT fn.name, f.type
+        query = '''SELECT fn.name, f.type, f.id 
         FROM files f JOIN file_names fn ON 
         f.id = fn.file_id WHERE fn.name LIKE ?'''
         params = (f"%{file_name}%",)
@@ -229,7 +231,7 @@ class ChordNode:
             query += ' AND f.type = ?'
             params += (file_type,)
         self.cursor.execute(query, params)
-        return [{"name": row[0], "type": row[1]} for row in self.cursor.fetchall()]
+        return [{"name": row[0], "type": row[1], "hash":row[2], "ip":self.ip} for row in self.cursor.fetchall()]
 
     def download_file(self,file_name):
         """Descarga un archivo de la base de datos."""
@@ -387,8 +389,9 @@ class ChordNode:
                 parts = message.split(',')
                 file_name, file_type = parts[1], parts[2]
                 local_results = self.search_file(file_name, file_type)
-                response = f"SEARCH_RESULT:{local_results}"
-                sock.sendto(response.encode(), addr)
+                if local_results:
+                    response = f"SEARCH_RESULT:{local_results}"
+                    sock.sendto(response.encode(), addr)
         except Exception as e:
             print(f"Error al manejar mensaje de broadcast: {e}")
 
