@@ -2,6 +2,8 @@ import socket
 import threading
 import time
 import hashlib
+import os
+import sqlite3
 
 BROADCAST_PORT = 50000 
 SERVER_IP = socket.gethostbyname(socket.gethostname())
@@ -17,6 +19,7 @@ CLOSEST_PRECEDING_FINGER = 6
 IS_ALIVE = 7
 NOTIFY1 = 8
 STORE_KEY = 9
+UPLOAD_FILE = 10
 
 def getShaRepr(data: str):
     return int(hashlib.sha1(data.encode()).hexdigest(),16)
@@ -71,6 +74,11 @@ class ChordNodeReference:
     
     def store_key(self, key: str, value: str):
         self._send_data(STORE_KEY, f'{key},{value}')
+    
+    def save_file(self, file_name, file_type, file_content):
+        data = f'{file_name},{file_type},{file_content}'
+        response = self._send_data(UPLOAD_FILE, data)
+        return response
 
     def __str__(self) -> str:
         return f'{self.id},{self.ip},{self.port}'
@@ -92,6 +100,14 @@ class ChordNode:
         self.succ2 = self.ref
         self.succ3 = self.ref
         self.data = {}
+
+        #manejo de la base de datos
+        DB_FILE = "db/server_files.db"
+        os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+        self.conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        self.cursor = self.conn.cursor()
+        self._init_db()
+
 
         threading.Thread(target=self.stabilize, daemon=True).start()  # Start stabilize thread
         threading.Thread(target=self.fix_fingers, daemon=True).start()  # Start fix fingers thread
@@ -122,6 +138,70 @@ class ChordNode:
     def succ(self, node: 'ChordNodeReference'):
         with self.lock:
             self.finger[0] = node
+
+    def _init_db(self):
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hash TEXT UNIQUE NOT NULL,
+            content BLOB NOT NULL,
+            type TEXT NOT NULL
+        )
+        ''')
+
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS file_names (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            FOREIGN KEY (file_id) REFERENCES files (id)
+        )
+        ''')
+        self.conn.commit()
+
+    def save_file(self, file_name, file_type, file_content):
+        """Guarda un archivo en la base de datos."""
+        with self.lock:
+            file_hash = getShaRepr(str(file_content))
+            self.cursor.execute('SELECT id FROM files WHERE hash = ?', (file_hash,))
+            file_record = self.cursor.fetchone()
+
+            if file_record:
+                file_id = file_record[0]
+                self.cursor.execute('SELECT name FROM file_names WHERE file_id = ? AND name = ?', (file_id, file_name))
+                name_record = self.cursor.fetchone()
+
+                if not name_record:
+                    self.cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
+                    self.conn.commit()
+                    return "Nombre agregado al archivo existente"
+                return "El archivo ya existe con ese nombre"
+            else:
+                self.cursor.execute('INSERT INTO files (hash, content, type) VALUES (?, ?, ?)', (file_hash, file_content, file_type))
+                file_id = self.cursor.lastrowid
+                self.cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
+                self.conn.commit()
+                return "Archivo subido correctamente"
+
+    def search_file(self, file_name, file_type):
+        """Busca un archivo en la base de datos."""
+        query = '''SELECT DISTINCT fn.name, f.type
+        FROM files f JOIN file_names fn ON 
+        f.id = fn.file_id WHERE fn.name LIKE ?'''
+        params = (f"%{file_name}%",)
+        if file_type != "*":
+            query += ' AND f.type = ?'
+            params += (file_type,)
+        self.cursor.execute(query, params)
+        return [{"name": row[0], "type": row[1]} for row in self.cursor.fetchall()]
+
+    def download_file(self,file_name):
+        """Descarga un archivo de la base de datos."""
+        self.cursor.execute('''SELECT f.content, fn.name FROM files f
+        JOIN file_names fn ON f.id = fn.file_id WHERE fn.name = ?''', (file_name,))
+        result = self.cursor.fetchone()
+        return {'name': result[1], 'content': result[0]} if result else None
+
 
     def _inbetween(self, k: int, start: int, end: int) -> bool:
         """Check if k is in the interval [start, end)."""
@@ -346,6 +426,19 @@ class ChordNode:
             self.store_key(key, value)
             print(self.data)
             conn.sendall(self.data)
+        elif option == UPLOAD_FILE:
+            file_name, file_type, file_content = data[1], data[2], data[3]
+            file_hash = getShaRepr(str(file_content))
+            # Encontrar el nodo responsable de almacenar el archivo
+            responsible_node = self.find_succ(file_hash)
+            if responsible_node.id == self.id:
+                # Este nodo es responsable de almacenar el archivo
+                response = self.save_file(file_name, file_type, file_content)
+            else:
+                # Enviar el archivo al nodo responsable
+                response = responsible_node.save_file(file_name, file_type, file_content)
+                print(response)
+            conn.sendall(response.encode())
         if data_resp == 'alive':
             response = data_resp.encode()
             conn.sendall(response)
