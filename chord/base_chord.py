@@ -20,6 +20,8 @@ IS_ALIVE = 7
 NOTIFY1 = 8
 STORE_KEY = 9
 UPLOAD_FILE = 10
+SEARCH_FILE = 11
+
 
 def getShaRepr(data: str):
     return int(hashlib.sha1(data.encode()).hexdigest(),16)
@@ -183,6 +185,32 @@ class ChordNode:
                 self.conn.commit()
                 return "Archivo subido correctamente"
 
+    def broadcast_search(self, file_name, file_type):
+        """Realiza una búsqueda por broadcast en la red CHORD."""
+        results = []
+        broadcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        broadcast_socket.settimeout(3)  # Tiempo de espera para respuestas
+
+        # Enviar mensaje de broadcast
+        message = f"{SEARCH_FILE},{file_name},{file_type}"
+        broadcast_socket.sendto(message.encode(), (BROADCAST_ADDRESS, BROADCAST_PORT))
+
+        # Recibir respuestas de los nodos
+        while True:
+            try:
+                data, addr = broadcast_socket.recvfrom(1024)
+                response = data.decode()
+                if response.startswith("SEARCH_RESULT:"):
+                    # Formato: SEARCH_RESULT:result1,result2,...
+                    results.extend(eval(response.split(":")[1]))
+            except socket.timeout:
+                break  # No hay más respuestas
+
+        broadcast_socket.close()
+        return results
+
+
     def search_file(self, file_name, file_type):
         """Busca un archivo en la base de datos."""
         query = '''SELECT DISTINCT fn.name, f.type
@@ -330,12 +358,32 @@ class ChordNode:
                 data, addr = sock.recvfrom(1024)
                 message = data.decode('utf-8')
                 print(f"Recibido mensaje de broadcast: {message} de {addr}")
-                if message == "DISCOVER_REQUEST":
-                    response = f"SERVER_IP:{SERVER_IP}"
-                    sock.sendto(response.encode('utf-8'), addr)
+                # Crear un hilo para manejar el mensaje
+                threading.Thread(
+                    target=self.handle_broadcast_message,
+                    args=(sock, message, addr),
+                    daemon=True
+                ).start()
+                
             except Exception as e:
                 print(f"Error en el hilo de descubrimiento: {e}")
                 break
+    
+    def handle_broadcast_message(self, sock, message, addr):
+        try:
+            if message == "DISCOVER_REQUEST":
+                    response = f"SERVER_IP:{SERVER_IP}"
+                    sock.sendto(response.encode('utf-8'), addr)
+            elif message.startswith(f"{SEARCH_FILE},"):
+                # Formato: BROADCAST_SEARCH,file_name,file_type
+                parts = message.split(',')
+                file_name, file_type = parts[1], parts[2]
+                local_results = self.search_file(file_name, file_type)
+                response = f"SEARCH_RESULT:{local_results}"
+                sock.sendto(response.encode(), addr)
+        except Exception as e:
+            print(f"Error al manejar mensaje de broadcast: {e}")
+
     
     def discover_server(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -439,6 +487,15 @@ class ChordNode:
                 response = responsible_node.save_file(file_name, file_type, file_content)
                 print(response)
             conn.sendall(response.encode())
+        elif option == SEARCH_FILE:
+            file_name,file_type= data[1],data[2]
+            try:
+                results= self.broadcast_search(file_name,file_type)
+                conn.sendall(str(results).encode())
+            except Exception as e:
+                print(f"ERROR DURANTE LA BUSQUEDA POR BROADCAST: {e}")
+                conn.sendall("ERROR DURANTE LA BUSQUEDA POR BROADCAST".encode())
+            
         if data_resp == 'alive':
             response = data_resp.encode()
             conn.sendall(response)
