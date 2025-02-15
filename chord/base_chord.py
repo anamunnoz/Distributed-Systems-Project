@@ -21,6 +21,7 @@ NOTIFY1 = 8
 STORE_KEY = 9
 UPLOAD_FILE = 10
 SEARCH_FILE = 11
+DOWNLOAD_FILE = 12
 
 
 def getShaRepr(data: str):
@@ -506,7 +507,10 @@ class ChordNode:
             except Exception as e:
                 print(f"ERROR DURANTE LA BUSQUEDA POR BROADCAST: {e}")
                 conn.sendall("ERROR DURANTE LA BUSQUEDA POR BROADCAST".encode())
-            
+        elif option == DOWNLOAD_FILE:
+            file_name = data[1]
+            response = self.download_file(file_name)
+            conn.sendall(str(response).encode())
         if data_resp == 'alive':
             response = data_resp.encode()
             conn.sendall(response)
