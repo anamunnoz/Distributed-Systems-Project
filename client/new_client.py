@@ -19,15 +19,23 @@ def upload_file(command):
         file_name = os.path.basename(file_path)
         file_type = file_name.split(".")[-1]
 
-        with open(file_path, "rb") as f:
-            content = f.read()
-        message = f"{10},{file_name},{file_type},{content}".encode()
-        client_socket.sendall(message)
-        answer = client_socket.recv(1024)
-        print(f"[INFO] Respuesta del servidor: {answer.decode()}")
+        client_socket.send(f"{10},{file_name},{file_type}".encode())
+        ready = client_socket.recv(1024).decode()
+        if ready == 'READY':
+            with open(file_path, "rb") as f:
+                while chunk := f.read(1024000):
+                    client_socket.send(chunk)
+                    resp = client_socket.recv(1024).decode()
+                    if resp == 'NEXT':
+                        pass
+            client_socket.send(b'EOF')
+        response = client_socket.recv(1024).decode()
+        print(f"[INFO] Respuesta del servidor: {response}")
         client_socket.close()
     except Exception as e:
         print(f"No se pudo procesar el comando: {e}")
+        client_socket.close()
+
 
 def download_file(command):
 
@@ -72,14 +80,15 @@ def download_file(command):
                 client_s.connect((host, port))
                 name=results[index]['name']
                 client_s.sendall(f"{12},{name}".encode())
-                resp=client_s.recv(1024000)
-                #print(resp)
-                #file = eval(resp)
-                #if 'error' in file:
-                #    print(f"[ERROR] {file['error']}")
-                #else:
+                
                 with open(name, 'wb') as f:
-                    f.write(resp)
+                    while True:
+                        chunk = client_socket.recv(1024000)
+                        if chunk == b'EOF':
+                            break
+                        f.write(chunk)
+                        client_s.sendall(b'NEXT')
+                        
                 print(f"[INFO] Archivo descargado y guardado como {name}")
                 client_s.close()
             else:

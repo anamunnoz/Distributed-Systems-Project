@@ -499,7 +499,15 @@ class ChordNode:
             print(self.data)
             conn.sendall(self.data)
         elif option == UPLOAD_FILE:
-            file_name, file_type, file_content = data[1], data[2], data[3]
+            file_name, file_type = data[1], data[2]
+            conn.send('READY'.encode())
+            file_content = b''
+            while True:
+                chunk = conn.recv(1024000)
+                if chunk == b'EOF':
+                    break
+                file_content += chunk
+                conn.send('NEXT'.encode())
             file_hash = getShaRepr(str(file_content))
             # Encontrar el nodo responsable de almacenar el archivo
             responsible_node = self.find_succ(file_hash)
@@ -525,9 +533,12 @@ class ChordNode:
         elif option == DOWNLOAD_FILE:
             file_name = data[1]
             response = self.download_file(file_name)
-            print(response)
-            conn.sendall(eval(response))
-
+            for i in range(0, len(response), 1024000):
+                chunk = response[i:i+1024000]
+                conn.send(chunk)
+                conn.recv(1024)
+            
+            conn.send(b'EOF')
         if option in [UPLOAD_FILE,SEARCH_FILE,DOWNLOAD_FILE]:
             return
         if data_resp == 'alive':
