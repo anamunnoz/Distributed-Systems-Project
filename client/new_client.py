@@ -1,8 +1,9 @@
 import asyncio
 import zmq.asyncio
 import os
+import socket
 
-async def upload_file(client_socket, command):
+def upload_file(client_socket: socket.socket, command):
     """Sube un archivo al servidor."""
     try:
         _, file_path = command.split(" ", 1)
@@ -15,14 +16,14 @@ async def upload_file(client_socket, command):
 
         with open(file_path, "rb") as f:
             content = f.read()
-        message = {'action': 'subir', 'file_name': file_name, 'file_type': file_type, 'file_content': content}
-        await client_socket.send_pyobj(message)
-        answer = await client_socket.recv_string()
-        print(f"[INFO] Respuesta del servidor: {answer}")
+        message = f"{10},{file_name},{file_type},{content}".encode()
+        client_socket.sendall(message)
+        answer = client_socket.recv(1024)
+        print(f"[INFO] Respuesta del servidor: {answer.decode()}")
     except Exception as e:
         print(f"No se pudo procesar el comando: {e}")
 
-async def download_file(client_socket, command):
+def download_file(client_socket, command):
     """Descarga un archivo del servidor."""
 
     try: 
@@ -33,9 +34,10 @@ async def download_file(client_socket, command):
         
         file_name = parts[1]
         file_type = parts[2] if len(parts) > 2 else "*"
-        message = {'action': 'buscar', 'file_name': file_name, 'file_type': file_type}
-        await client_socket.send_pyobj(message)
-        results = await client_socket.recv_pyobj()
+        message = f"{11},{file_name},{file_type}".encode()
+        client_socket.sendall(message)
+        print("antes del eval")
+        results = eval(client_socket.recv(1024).decode())
 
         if not results:
             print("[ERROR] No se encontraron resultados.")
@@ -50,8 +52,8 @@ async def download_file(client_socket, command):
         if selection.isdigit():
             index = int(selection) -1
             if 0 <= index < len(results):
-                await client_socket.send_pyobj({'action': 'descargar', 'file_name': results[index]['name']})
-                file = await client_socket.recv_pyobj()
+                client_socket.sendall(f"{12},{results[index]['name']}".encode())
+                file = eval(client_socket.recv(1024).decode())
                 if 'error' in file:
                     print(f"[ERROR] {file['error']}")
                 else:
@@ -66,19 +68,19 @@ async def download_file(client_socket, command):
         print(f"[ERROR] Error al descargar el archivo: {e}")
 
 
-async def client_program(host="10.0.11.2", port=8001):
-    context = zmq.asyncio.Context()
-    socket = context.socket(zmq.REQ)
-    socket.connect(f"tcp://{host}:{port}")
+def client_program(host="10.0.11.3", port=8001):
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    client_socket.connect((host, port))
     print("[INFO] Conectado al servidor.")
     
     try:
         while True:
             command = input("Ingrese el comando: ")
             if command.startswith("subir"):
-                await upload_file(socket, command)
+                upload_file(client_socket, command)
             elif command.startswith("descargar"):
-                await download_file(socket, command)
+                download_file(client_socket, command)
             elif command.startswith("salir"):
                 break
             else:
@@ -88,4 +90,5 @@ async def client_program(host="10.0.11.2", port=8001):
         print("[INFO] Conexión cerrada.")
 
 if __name__ == "__main__":
-    asyncio.run(client_program())
+    client_program()
+
