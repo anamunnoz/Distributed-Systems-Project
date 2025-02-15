@@ -205,10 +205,10 @@ class ChordNode:
         broadcast_socket.sendto(message.encode(), (BROADCAST_ADDRESS, BROADCAST_PORT))
 
         def handle_response(m):
-            if m.startswith("SEARCH_RESULT:"):
+            if m.startswith("SEARCH_RESULT~"):
                     print("TENGO RESPUESTA")
                     # Formato: SEARCH_RESULT:result1,result2,...
-                    Elements=eval(m.split(":")[1])
+                    Elements=eval(m.split("~")[1])
                     with self.lock:
                         for e in Elements:
                             if e not in results: results.append(e)
@@ -250,7 +250,7 @@ class ChordNode:
         self.cursor.execute('''SELECT f.content, fn.name FROM files f
         JOIN file_names fn ON f.id = fn.file_id WHERE fn.name = ?''', (file_name,))
         result = self.cursor.fetchone()
-        return {'name': result[1], 'content': result[0]} if result else None
+        return result[0] if result else None
 
 
     def _inbetween(self, k: int, start: int, end: int) -> bool:
@@ -402,7 +402,7 @@ class ChordNode:
                 file_name, file_type = parts[1], parts[2]
                 local_results = self.search_file(file_name, file_type)
                 if local_results:
-                    response = f"SEARCH_RESULT:{local_results}"
+                    response = f"SEARCH_RESULT~{local_results}"
                     sock.sendto(response.encode(), addr)
         except Exception as e:
             print(f"Error al manejar mensaje de broadcast: {e}")
@@ -525,7 +525,8 @@ class ChordNode:
         elif option == DOWNLOAD_FILE:
             file_name = data[1]
             response = self.download_file(file_name)
-            conn.sendall(str(response).encode())
+            print(response)
+            conn.sendall(eval(response))
 
         if option in [UPLOAD_FILE,SEARCH_FILE,DOWNLOAD_FILE]:
             return
