@@ -1,16 +1,49 @@
-import asyncio
-import zmq.asyncio
 import os
 import socket
-import time
+import struct
+
+MULTICAST_GROUP = '224.0.0.1'
+MULTICAST_PORT = 10000
+
 
 def upload_file(command):
-    host="10.0.11.3"
-    port=8001
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.setblocking(True)
-    client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    client_socket.connect((host, port))
+    # Crear socket multicast
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(5)  # Esperar 5 segundos por una respuesta
+    sock.bind(("",MULTICAST_PORT))
+
+    # Unirse al grupo multicast
+    group = socket.inet_aton(MULTICAST_GROUP)
+    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+    # Enviar solicitud de descubrimiento
+    discover_message = b"DISCOVER_NODE"
+    sock.sendto(discover_message, (MULTICAST_GROUP, MULTICAST_PORT))
+
+    # Esperar respuesta de un nodo
+    try:
+        print("Esperando respuesta de un nodo...")
+        while True:
+            data, addr = sock.recvfrom(1024)
+            if data == b"DISCOVER_NODE":
+                continue
+            node_ip = data.decode()  # La IP del nodo activo
+            print(f"Nodo descubierto: {node_ip}")
+            break
+
+        # Ahora el cliente puede conectarse directamente al nodo
+        # Ejemplo de conexión TCP:
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.setblocking(True)
+        client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        client_socket.connect((node_ip, 8001))  # Conectar al puerto 5000 del nodo
+        print(f"Conectado al nodo {node_ip}")
+    except socket.timeout:
+        print("No se recibió respuesta de ningún nodo.") 
+    finally:
+        sock.close()
+
     """Sube un archivo al servidor."""
     try:
         _, file_path = command.split(" ", 1)
@@ -27,15 +60,7 @@ def upload_file(command):
             with open(file_path, "rb") as f:
                 while chunk := f.read(1024000):
                     client_socket.send(chunk)
-                    #resp = client_socket.recv(1024).decode()
-                    #if resp == 'NEXT':
-                    #    pass
-            #client_socket.send(b"EOF")
-            #churre = client_socket.recv(1024).decode() 
             response = client_socket.recv(1024).decode()
-            #if response == '':
-            #    response = churre
-
             print(f"[INFO] Respuesta del servidor: {response}")
             client_socket.close()
     except Exception as e:
@@ -44,12 +69,43 @@ def upload_file(command):
 
 
 def download_file(command):
+    # Crear socket multicast
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(5)  # Esperar 5 segundos por una respuesta
 
-    host="10.0.11.3"
-    port=8001
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    client_socket.connect((host, port))
+
+    # Unirse al grupo multicast
+    group = socket.inet_aton(MULTICAST_GROUP)
+    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    sock.bind(("",MULTICAST_PORT))
+    # Enviar solicitud de descubrimiento
+    discover_message = b"DISCOVER_NODE"
+    sock.sendto(discover_message, (MULTICAST_GROUP, MULTICAST_PORT))
+
+    # Esperar respuesta de un nodo
+    try:
+        print("Esperando respuesta de un nodo...")
+        while True:
+            data, addr = sock.recvfrom(1024)
+            if data == b"DISCOVER_NODE":
+                continue
+            node_ip = data.decode()  # La IP del nodo activo
+            print(f"Nodo descubierto: {node_ip}")
+            break
+
+        # Ahora el cliente puede conectarse directamente al nodo
+        # Ejemplo de conexión TCP:
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.setblocking(True)
+        client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        client_socket.connect((node_ip, 8001))  # Conectar al puerto 5000 del nodo
+        print(f"Conectado al nodo {node_ip}")
+    except socket.timeout:
+        print("No se recibió respuesta de ningún nodo.")
+    finally:
+        sock.close()
+    
     """Descarga un archivo del servidor."""
 
     try: 
@@ -64,8 +120,6 @@ def download_file(command):
         client_socket.sendall(message)
         print("antes del eval")
         results = eval(client_socket.recv(1024).decode())
-
-        
         if not results:
             print("[ERROR] No se encontraron resultados.")       
             return
@@ -92,10 +146,7 @@ def download_file(command):
                 with open(name, 'wb') as f:
                     while remainder > 0:
                         chunk = client_s.recv(min(remainder,1024000))
-                        #if not chunk: #== b"EOF":
-                        #    break
                         f.write(chunk)
-                        #client_s.send(b'NEXT')
                         remainder -= len(chunk)
                         
                 print(f"[INFO] Archivo descargado y guardado como {name}")
@@ -112,9 +163,6 @@ def download_file(command):
 
 
 def client_program(host="10.0.11.3", port=8001):
-    #client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    #client_socket.connect((host, port))
     print("[INFO] Conectado al servidor.")
     
     try:

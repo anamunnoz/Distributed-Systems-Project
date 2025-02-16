@@ -4,10 +4,15 @@ import time
 import hashlib
 import os
 import sqlite3
+import struct 
+
 
 BROADCAST_PORT = 50000 
 SERVER_IP = socket.gethostbyname(socket.gethostname())
 BROADCAST_ADDRESS = '<broadcast>' 
+
+MULTICAST_GROUP = '224.0.0.1'
+MULTICAST_PORT = 10000
 
 # Operation codes
 FIND_SUCCESSOR = 1
@@ -148,6 +153,21 @@ class ChordNode:
         discovery_thread = threading.Thread(target=self.handle_discovery, args=(sock,))
         discovery_thread.daemon = True  # El hilo se cierra cuando el programa principal termina
         discovery_thread.start()
+
+        # Crear socket multicast
+        sock_m = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock_m.bind(('', MULTICAST_PORT))
+
+        # Unirse al grupo multicast
+        group = socket.inet_aton(MULTICAST_GROUP)
+        mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+        sock_m.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        print(f"Escuchando en {MULTICAST_GROUP}:{MULTICAST_PORT}...")
+        multicast_thread = threading.Thread(target=self.handle_multicast_discover,args=(sock_m,))
+        multicast_thread.daemon=True
+        multicast_thread.start()
+
+
         self.new_ip = self.discover_server()
         print("discovery_ip: ", self.new_ip)
         if self.new_ip is not None:
@@ -426,6 +446,20 @@ class ChordNode:
         except Exception as e:
             print(f"Error al manejar mensaje de broadcast: {e}")
 
+
+
+    def handle_multicast_discover(self,sock):
+        try:
+            while True:
+                data, addr = sock.recvfrom(1024)
+                if data == b"DISCOVER_NODE":
+                    print("RECIBIDO MENSAJE DE MULTICAST")
+                    # Responder con la dirección IP del nodo
+                    node_ip = socket.gethostbyname(socket.gethostname())
+                    sock.sendto(node_ip.encode(), (MULTICAST_GROUP,MULTICAST_PORT))
+                    print(f"Respondí a {MULTICAST_GROUP} con mi IP: {node_ip}")
+        except Exception as e:
+            print(f"ERROR EN EL hilo de multicast: {e}")
     
     def discover_server(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
