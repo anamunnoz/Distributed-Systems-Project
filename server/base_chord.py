@@ -27,7 +27,7 @@ STORE_KEY = 9
 UPLOAD_FILE = 10
 SEARCH_FILE = 11
 DOWNLOAD_FILE = 12
-SALIR = 13
+SAVE_REPLIC = 13
 
 
 def compute_hash(file_content):
@@ -87,6 +87,19 @@ class ChordNodeReference:
     
     def store_key(self, key: str, value: str):
         self._send_data(STORE_KEY, f'{key},{value}')
+
+    def save_in_replics(self,obj):
+        s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.connect((self.ip, self.port))
+        s.send(f"{13},{obj['name']},{obj['type']},{len(obj['content'])},{','.join(obj['nodes'])}".encode())
+        ready = s.recv(1024).decode()
+        if ready == 'READY':
+            print("ENVIANDO")
+            for i in range(0, len(obj["content"]), 1024000):
+                chunk = obj["content"][i:i+1024000]
+                s.send(chunk)
+        s.close()
     
     def save_file(self, file_name, file_type, file_content, file_size):
         s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -97,7 +110,6 @@ class ChordNodeReference:
         if ready == 'READY':
             print("ENVIANDO")
             for i in range(0, len(file_content), 1024000):
-                print("CHUNK")
                 chunk = file_content[i:i+1024000]
                 s.send(chunk)
                 #s.recv(1024)
@@ -131,6 +143,7 @@ class ChordNode:
         self.succ2 = self.ref
         self.succ3 = self.ref
         self.data = {}
+        self.replics=[]
 
         #manejo de la base de datos
         DB_FILE = "db/server_files.db"
@@ -153,6 +166,11 @@ class ChordNode:
         discovery_thread = threading.Thread(target=self.handle_discovery, args=(sock,))
         discovery_thread.daemon = True  # El hilo se cierra cuando el programa principal termina
         discovery_thread.start()
+
+        replic_thread = threading.Thread(target=self.replicate)
+        replic_thread.daemon = True  # El hilo se cierra cuando el programa principal termina
+        replic_thread.start()
+
 
         # Crear socket multicast
         sock_m = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -205,7 +223,7 @@ class ChordNode:
         ''')
         self.conn.commit()
 
-    def save_file(self, file_name, file_type, file_content):
+    def save_file(self, file_name, file_type, file_content,r):
         """Guarda un archivo en la base de datos."""
         with self.lock:
             file_hash = compute_hash(file_content)
@@ -220,6 +238,9 @@ class ChordNode:
                 if not name_record:
                     self.cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
                     self.conn.commit()
+                    if r == 0: 
+                        print("PRIMERA VEZ, CREO PRIMERA REPLICA")
+                        self.replics.append({'name':file_name,'type':file_type,'content':file_content,'nodes':[self.ip]})
                     return "Nombre agregado al archivo existente"
                 return "El archivo ya existe con ese nombre"
             else:
@@ -227,6 +248,9 @@ class ChordNode:
                 file_id = self.cursor.lastrowid
                 self.cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
                 self.conn.commit()
+                if r == 0: 
+                    self.replics.append({'name':file_name,'type':file_type,'content':file_content,'nodes':[self.ip]})
+                    print("PRIMERA VEZ, CREO PRIMERA REPLICA")
                 return "Archivo subido correctamente"
 
     def broadcast_search(self, file_name, file_type):
@@ -495,6 +519,23 @@ class ChordNode:
         finally:
             sock.close()
 
+    def replicate(self):
+        time.sleep(5)
+        while True:
+            if self.replics:
+                print("TENGO REPLICA, VOY A MANEJARLA")
+                obj = self.replics.pop(0)
+                if len(obj["nodes"])<3:
+                    if self.ip not in obj["nodes"]:
+                        print(f"REPLICANDO ARCHIVO EN NODO: {self.ip}")
+                        self.save_file(obj['name'],obj['type'],obj['content'],1)
+                        obj['nodes'].append(self.ip)
+                    #pasarlo al sucesor
+                    
+                    self.succ.save_in_replics(obj)
+            else:
+                time.sleep(5)
+
     def store_key(self, key, value):
         key_hash = getShaRepr(key)
         print("key: ", key, "hash: ", key_hash)
@@ -519,8 +560,9 @@ class ChordNode:
     def serve_client(self, conn: socket.socket):
         
         data = conn.recv(1024).decode().split(',')
-
         data_resp = None
+        if (data[0] not in ["3","4"]):
+            print(f"DATAAAAAAAAA: {data[0]}")
         option = int(data[0])
 
         if option == FIND_SUCCESSOR:
@@ -575,7 +617,7 @@ class ChordNode:
             if responsible_node.id == self.id:
                 print("SOY YO")
                 # Este nodo es responsable de almacenar el archivo
-                response = self.save_file(file_name, file_type, file_content)
+                response = self.save_file(file_name, file_type, file_content,0)
             else:
                 print("ES OTRO")
                 # Enviar el archivo al nodo responsable
@@ -604,6 +646,27 @@ class ChordNode:
                 conn.send(chunk)
                 #conn.recv(1024)
             #conn.send(b"EOF")
+
+        elif option == SAVE_REPLIC:
+            file_name,file_type,file_size= data[1],data[2],int(data[3])
+            nodes ="["
+            for i in range(4,len(data)):
+                nodes+= "\"" + data[i] + "\""
+                if i!=len(data)-1:
+                    nodes+=","
+            nodes+="]"
+            nodes= eval(nodes)
+            conn.send('READY'.encode())
+            file_content = b""
+            remaining = file_size
+            while remaining > 0:
+                chunk = conn.recv(min(1024000, remaining))
+                if not chunk: 
+                    break
+                file_content += chunk
+                remaining -= len(chunk)
+            self.replics.append({'name':file_name,'type':file_type,'content':file_content,'nodes':nodes})
+
         if option in [UPLOAD_FILE,SEARCH_FILE]:
             print("LE DI AL RETURN")
             return
