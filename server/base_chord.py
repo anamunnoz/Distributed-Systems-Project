@@ -137,6 +137,7 @@ class ChordNode:
         self.succ2 = self.ref
         self.succ3 = self.ref
         self.data = {}
+        self.replics= []
         
         #manejo de la base de datos
         DB_FILE = "db/server_files.db"
@@ -145,7 +146,7 @@ class ChordNode:
         self.cursor = self.conn.cursor()
         self._init_db()
 
-        self.replics= self.load_replics()
+        
 
 
         threading.Thread(target=self.stabilize, daemon=True).start()  # Start stabilize thread
@@ -218,21 +219,6 @@ class ChordNode:
         ''')
         self.conn.commit()
 
-    def load_replics(self):
-        if os.path.exists("db/replics.json"):
-            with open("db/replics.json", "r") as f:
-                return json.load(f)
-        return []
-
-    def save_replics(self):
-        with open("db/replics.json", "w") as f:
-            with self.lock:
-                json.dump(self.replics, f)
-    
-    def add_replic(self, replic):
-        self.replics.append(replic)
-        self.save_replics()
-    
 
     def save_file(self, file_name, file_type, file_content,r):
         """Guarda un archivo en la base de datos."""
@@ -251,7 +237,7 @@ class ChordNode:
                     self.conn.commit()
                     if r == 0: 
                         print("PRIMERA VEZ, CREO PRIMERA REPLICA")
-                        self.add_replic({'name':file_name,'type':file_type,'content':file_content,'nodes':[self.ip]})
+                        self.replics.append({'name':file_name,'type':file_type,'content':file_content,'nodes':[self.ip]})
                     return "Nombre agregado al archivo existente"
                 return "El archivo ya existe con ese nombre"
             else:
@@ -260,7 +246,7 @@ class ChordNode:
                 self.cursor.execute('INSERT INTO file_names (file_id, name) VALUES (?, ?)', (file_id, file_name))
                 self.conn.commit()
                 if r == 0: 
-                    self.add_replic({'name':file_name,'type':file_type,'content':file_content,'nodes':[self.ip]})
+                    self.replics.append({'name':file_name,'type':file_type,'content':file_content,'nodes':[self.ip]})
                     print("PRIMERA VEZ, CREO PRIMERA REPLICA")
                 return "Archivo subido correctamente"
 
@@ -536,7 +522,6 @@ class ChordNode:
             if self.replics:
                 print("TENGO REPLICA, VOY A MANEJARLA")
                 obj = self.replics.pop(0)
-                self.save_replics()
                 if len(obj["nodes"])<3:
                     if self.ip not in obj["nodes"]:
                         print(f"REPLICANDO ARCHIVO EN NODO: {self.ip}")
@@ -677,7 +662,7 @@ class ChordNode:
                     break
                 file_content += chunk
                 remaining -= len(chunk)
-            self.add_replic({'name':file_name,'type':file_type,'content':file_content,'nodes':nodes})
+            self.replics.append({'name':file_name,'type':file_type,'content':file_content,'nodes':nodes})
 
         if option in [UPLOAD_FILE,SEARCH_FILE]:
             print("LE DI AL RETURN")
