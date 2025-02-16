@@ -123,22 +123,28 @@ def download_file(command):
         if not results:
             print("[ERROR] No se encontraron resultados.")       
             return
-        
+        hashes=[]
+        files=[]
+        for result in results:
+            if result['hash'] not in hashes:
+                hashes.append(result['hash'])
+                files.append(result)
+
         print("[INFO] Resultados de búsqueda:")
 
-        for idx, result in enumerate(results, start =1):
+        for idx, result in enumerate(files, start =1):
             print(f"{idx}. {result['name']} ({result['type']})")
 
         selection = input("Ingrese el número del archivo a descargar: ")
         if selection.isdigit():
             index = int(selection) -1
-            if 0 <= index < len(results):
-                host=results[index]['ip']
+            if 0 <= index < len(files):
+                host=files[index]['ip']
                 port=8001
                 client_s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 client_s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 client_s.connect((host, port))
-                name=results[index]['name']
+                name=files[index]['name']
                 client_s.send(f"{12},{name}".encode())
                 size = int(client_s.recv(1024).decode())
                 remainder = size
