@@ -2,11 +2,13 @@ import asyncio
 import zmq.asyncio
 import os
 import socket
+import time
 
 def upload_file(command):
     host="10.0.11.3"
     port=8001
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.setblocking(True)
     client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     client_socket.connect((host, port))
     """Sube un archivo al servidor."""
@@ -18,20 +20,24 @@ def upload_file(command):
         
         file_name = os.path.basename(file_path)
         file_type = file_name.split(".")[-1]
-
-        client_socket.send(f"{10},{file_name},{file_type}".encode())
+        file_size = os.path.getsize(file_path)
+        client_socket.send(f"{10},{file_name},{file_type},{file_size}".encode())
         ready = client_socket.recv(1024).decode()
         if ready == 'READY':
             with open(file_path, "rb") as f:
                 while chunk := f.read(1024000):
                     client_socket.send(chunk)
-                    resp = client_socket.recv(1024).decode()
-                    if resp == 'NEXT':
-                        pass
-            client_socket.send(b'EOF')
-        response = client_socket.recv(1024).decode()
-        print(f"[INFO] Respuesta del servidor: {response}")
-        client_socket.close()
+                    #resp = client_socket.recv(1024).decode()
+                    #if resp == 'NEXT':
+                    #    pass
+            #client_socket.send(b"EOF")
+            #churre = client_socket.recv(1024).decode() 
+            response = client_socket.recv(1024).decode()
+            #if response == '':
+            #    response = churre
+
+            print(f"[INFO] Respuesta del servidor: {response}")
+            client_socket.close()
     except Exception as e:
         print(f"No se pudo procesar el comando: {e}")
         client_socket.close()
@@ -79,15 +85,18 @@ def download_file(command):
                 client_s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 client_s.connect((host, port))
                 name=results[index]['name']
-                client_s.sendall(f"{12},{name}".encode())
-                
+                client_s.send(f"{12},{name}".encode())
+                size = int(client_s.recv(1024).decode())
+                remainder = size
+                client_s.send('ACK'.encode())
                 with open(name, 'wb') as f:
-                    while True:
-                        chunk = client_socket.recv(1024000)
-                        if chunk == b'EOF':
-                            break
+                    while remainder > 0:
+                        chunk = client_s.recv(min(remainder,1024000))
+                        #if not chunk: #== b"EOF":
+                        #    break
                         f.write(chunk)
-                        client_s.sendall(b'NEXT')
+                        #client_s.send(b'NEXT')
+                        remainder -= len(chunk)
                         
                 print(f"[INFO] Archivo descargado y guardado como {name}")
                 client_s.close()

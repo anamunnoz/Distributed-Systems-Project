@@ -47,7 +47,7 @@ class ChordNodeReference:
         except Exception as e:
             print(f"Error sending data: {e} operacion: {op} ")
             return b''
-
+        
     def find_successor(self, id: int) -> 'ChordNodeReference':
         response = self._send_data(FIND_SUCCESSOR, str(id)).decode().split(',')
         return ChordNodeReference(response[1], self.port)
@@ -83,9 +83,27 @@ class ChordNodeReference:
     def store_key(self, key: str, value: str):
         self._send_data(STORE_KEY, f'{key},{value}')
     
-    def save_file(self, file_name, file_type, file_content):
-        data = f'{file_name},{file_type},{file_content}'
-        response = self._send_data(UPLOAD_FILE, data)
+    def save_file(self, file_name, file_type, file_content, file_size):
+        s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.connect((self.ip, self.port))
+        s.send(f"{10},{file_name},{file_type},{file_size}".encode())
+        ready = s.recv(1024).decode()
+        if ready == 'READY':
+            print("ENVIANDO")
+            for i in range(0, len(file_content), 1024000):
+                print("CHUNK")
+                chunk = file_content[i:i+1024000]
+                s.send(chunk)
+                #s.recv(1024)
+            #s.send(b"EOF")
+        #churre = s.recv(1024)
+        response = s.recv(1024)
+        #if response == b'':
+        #    response = churre
+
+        print("CERREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE")
+        s.close()
         return response
 
     def __str__(self) -> str:
@@ -170,7 +188,7 @@ class ChordNode:
     def save_file(self, file_name, file_type, file_content):
         """Guarda un archivo en la base de datos."""
         with self.lock:
-            file_hash = compute_hash(file_content.encode())
+            file_hash = compute_hash(file_content)
             self.cursor.execute('SELECT id FROM files WHERE hash = ?', (file_hash,))
             file_record = self.cursor.fetchone()
 
@@ -235,7 +253,7 @@ class ChordNode:
 
     def search_file(self, file_name, file_type):
         """Busca un archivo en la base de datos."""
-        query = '''SELECT fn.name, f.type, f.id 
+        query = '''SELECT fn.name, f.type, f.hash 
         FROM files f JOIN file_names fn ON 
         f.id = fn.file_id WHERE fn.name LIKE ?'''
         params = (f"%{file_name}%",)
@@ -250,6 +268,7 @@ class ChordNode:
         self.cursor.execute('''SELECT f.content, fn.name FROM files f
         JOIN file_names fn ON f.id = fn.file_id WHERE fn.name = ?''', (file_name,))
         result = self.cursor.fetchone()
+        #print(f'CONTENIDO: {result[0]}')
         return result[0] if result else None
 
 
@@ -454,6 +473,7 @@ class ChordNode:
 
     def start_server(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setblocking(True)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind((self.ip, self.port))
             s.listen(10)
@@ -499,26 +519,36 @@ class ChordNode:
             print(self.data)
             conn.sendall(self.data)
         elif option == UPLOAD_FILE:
-            file_name, file_type = data[1], data[2]
+            file_name, file_type, file_size = data[1], data[2], int(data[3])
+            print("LISTO PARA RECIBIR")
             conn.send('READY'.encode())
-            file_content = b''
-            while True:
-                chunk = conn.recv(1024000)
-                if chunk == b'EOF':
+            file_content = b""
+            remaining = file_size
+            while remaining > 0:
+                chunk = conn.recv(min(1024000, remaining))
+                #if chunk == b"EOF":
+                #    break
+                if not chunk: 
                     break
                 file_content += chunk
-                conn.send('NEXT'.encode())
+                remaining -= len(chunk)
+                #conn.send('NEXT'.encode())
+            print("HASHING")
             file_hash = getShaRepr(str(file_content))
             # Encontrar el nodo responsable de almacenar el archivo
+            print("BUSCANDO SUCESOR")
             responsible_node = self.find_succ(file_hash)
             if responsible_node.id == self.id:
+                print("SOY YO")
                 # Este nodo es responsable de almacenar el archivo
                 response = self.save_file(file_name, file_type, file_content)
             else:
+                print("ES OTRO")
                 # Enviar el archivo al nodo responsable
-                response = responsible_node.save_file(file_name, file_type, file_content)
-                print(response)
-            conn.sendall(response.encode())
+                response = responsible_node.save_file(file_name, file_type, file_content, file_size).decode()
+            print("RESPONDO")
+            print(response.encode())
+            conn.send(response.encode())
         elif option == SEARCH_FILE:
             file_name,file_type= data[1],data[2]
             try:
@@ -533,13 +563,15 @@ class ChordNode:
         elif option == DOWNLOAD_FILE:
             file_name = data[1]
             response = self.download_file(file_name)
+            conn.send(f'{len(response)}'.encode())
+            conn.recv(1024).decode()
             for i in range(0, len(response), 1024000):
                 chunk = response[i:i+1024000]
                 conn.send(chunk)
-                conn.recv(1024)
-            
-            conn.send(b'EOF')
-        if option in [UPLOAD_FILE,SEARCH_FILE,DOWNLOAD_FILE]:
+                #conn.recv(1024)
+            #conn.send(b"EOF")
+        if option in [UPLOAD_FILE,SEARCH_FILE]:
+            print("LE DI AL RETURN")
             return
         if data_resp == 'alive':
             response = data_resp.encode()
