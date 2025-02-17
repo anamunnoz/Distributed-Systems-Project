@@ -190,7 +190,12 @@ def client_program(host="10.0.11.3", port=8001):
     
     try:
         while True:
-            command = input("Ingrese el comando: ")
+            mes = ''' Ingrese el comando según la siguiente lista:
+                - subir <ruta_archivo>
+                - descargar <nombre_archivo> <tipo_archivo>(opcional)
+                - salir
+            '''
+            command = input(mes)
             if command.startswith("subir"):
                 upload_file(command)
             elif command.startswith("descargar"):
