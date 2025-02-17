@@ -89,32 +89,42 @@ class ChordNodeReference:
         self._send_data(STORE_KEY, f'{key},{value}')
 
     def save_in_replics(self,obj):
-        s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.connect((self.ip, self.port))
-        s.send(f"{13},{obj['name']},{obj['type']},{len(obj['content'])},{','.join(obj['nodes'])}".encode())
-        ready = s.recv(1024).decode()
-        if ready == 'READY':
-            print("ENVIANDO")
-            for i in range(0, len(obj["content"]), 1024000):
-                chunk = obj["content"][i:i+1024000]
-                s.send(chunk)
-        s.close()
+        try:
+            s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.connect((self.ip, self.port))
+            s.send(f"{13},{obj['name']},{obj['type']},{len(obj['content'])},{','.join(obj['nodes'])}".encode())
+            ready = s.recv(1024).decode()
+            if ready == 'READY':
+                print("ENVIANDO")
+                for i in range(0, len(obj["content"]), 1024000):
+                    chunk = obj["content"][i:i+1024000]
+                    s.send(chunk)
+            s.close()
+            return  "ok"
+        except:
+            return "error"
+
     
     def save_file(self, file_name, file_type, file_content, file_size):
-        s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.connect((self.ip, self.port))
-        s.send(f"{10},{file_name},{file_type},{file_size}".encode())
-        ready = s.recv(1024).decode()
-        if ready == 'READY':
-            print("ENVIANDO")
-            for i in range(0, len(file_content), 1024000):
-                chunk = file_content[i:i+1024000]
-                s.send(chunk)
-        response = s.recv(1024)
-        print("CERREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE")
-        s.close()
+        try:
+            print("ENVIAR INFO DESDE REFERENCIA")
+            s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.connect((self.ip, self.port))
+            s.send(f"{10},{file_name},{file_type},{file_size}".encode())
+            print("INFO ENVIADA DESDE REFERENCIA")
+            ready = s.recv(1024).decode()
+            if ready == 'READY':
+                print("ENVIANDO")
+                for i in range(0, len(file_content), 1024000):
+                    chunk = file_content[i:i+1024000]
+                    s.send(chunk)
+            response = s.recv(1024)
+            print("CERREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE")
+            s.close()
+        except:
+            response = "ERROR".encode()
         return response
 
     def __str__(self) -> str:
@@ -399,8 +409,8 @@ class ChordNode:
                         self.succ = x
                         self.succ2 = self.succ.succ
                         self.succ3.notify1(self.ref)
-                    except:
-                        print(f"Error in stabilize: {e}")
+                    except Exception as h:
+                        print(f"Error in stabilize: {h}")
             try:
                 self.succ3 = self.succ.succ.succ
             except:
@@ -529,7 +539,10 @@ class ChordNode:
                         obj['nodes'].append(self.ip)
                     #pasarlo al sucesor
                     
-                    self.succ.save_in_replics(obj)
+                    message = self.succ.save_in_replics(obj)
+                    if message == "error":
+                        self.replics.append(obj)
+                    time.sleep(5)
             else:
                 time.sleep(5)
 
@@ -619,6 +632,12 @@ class ChordNode:
                 print("ES OTRO")
                 # Enviar el archivo al nodo responsable
                 response = responsible_node.save_file(file_name, file_type, file_content, file_size).decode()
+                while response == "ERROR":
+                    responsible_node = self.find_succ(file_hash)
+                    if responsible_node.id == self.id:
+                        response = self.save_file(file_name, file_type, file_content,0)
+                    else:
+                        response = responsible_node.save_file(file_name, file_type, file_content, file_size).decode()
             print("RESPONDO")
             print(response.encode())
             conn.send(response.encode())

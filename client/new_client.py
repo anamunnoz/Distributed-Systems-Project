@@ -61,10 +61,13 @@ def upload_file(command):
                 while chunk := f.read(1024000):
                     client_socket.send(chunk)
             response = client_socket.recv(1024).decode()
+            if response == '':
+                print("Inserte nuevamente el comando")
+                return
             print(f"[INFO] Respuesta del servidor: {response}")
             client_socket.close()
     except Exception as e:
-        print(f"No se pudo procesar el comando: {e}")
+        print("Inserte nuevamente el comando")
         client_socket.close()
 
 
@@ -125,10 +128,14 @@ def download_file(command):
             return
         hashes=[]
         files=[]
-        for result in results:
-            if result['hash'] not in hashes:
-                hashes.append(result['hash'])
-                files.append(result)
+        nodes=[]
+        for i in range(len(results)):
+            if results[i]['hash'] not in hashes:
+                hashes.append(results[i]['hash'])
+                nodes.append([results[i]['ip']])
+                files.append(results[i])
+            else:
+                nodes[hashes.index(results[i]['hash'])].append(results[i]['ip'])
 
         print("[INFO] Resultados de búsqueda:")
 
@@ -139,24 +146,34 @@ def download_file(command):
         if selection.isdigit():
             index = int(selection) -1
             if 0 <= index < len(files):
-                host=files[index]['ip']
-                port=8001
-                client_s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                client_s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                client_s.connect((host, port))
-                name=files[index]['name']
-                client_s.send(f"{12},{name}".encode())
-                size = int(client_s.recv(1024).decode())
-                remainder = size
-                client_s.send('ACK'.encode())
-                with open(name, 'wb') as f:
-                    while remainder > 0:
-                        chunk = client_s.recv(min(remainder,1024000))
-                        f.write(chunk)
-                        remainder -= len(chunk)
-                        
-                print(f"[INFO] Archivo descargado y guardado como {name}")
-                client_s.close()
+                    i=0
+                    for ip in nodes[index]:
+                        i+=1
+                        try:
+                            host=ip
+                            port=8001
+                            client_s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            client_s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                            client_s.connect((host, port))
+                            print(f"Conectado a {host}")
+                            name=files[index]['name']
+                            client_s.send(f"{12},{name}".encode())
+                            size = int(client_s.recv(1024).decode())
+                            remainder = size
+                            client_s.send('ACK'.encode())
+                            with open(name, 'wb') as f:
+                                while remainder > 0:
+                                    chunk = client_s.recv(min(remainder,1024000))
+                                    f.write(chunk)
+                                    remainder -= len(chunk)
+                                    
+                            print(f"[INFO] Archivo descargado y guardado como {name}")
+                            client_s.close()
+                            break
+                        except:
+                            pass
+                    if i == len(nodes[index]): print("Ingrese el comando de descarga nuevamente")
+                    
             else:
                 print("[ERROR] Número de archivo inválido.")
         else:
