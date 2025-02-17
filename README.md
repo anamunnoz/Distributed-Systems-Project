@@ -5,22 +5,21 @@
 - Dennis Daniel González Durán (C412)
 
 ## Comandos para configurar el entorno:
-En esta seccion se muestran los comandos necesarios para configurar el entorno de docker y permitir la comunicación entre los clientes y el servidor
+En esta sección se muestran los comandos necesarios para configurar el entorno de docker y permitir la comunicación entre los clientes y el servidor
 
 ### Crear las redes:
 - docker network create clients --subnet 10.0.10.0/24
 - docker network create servers --subnet 10.0.11.0/24
 
 ### Crear y configurar el router:
-- docker build -t router -f router/Dockerfile .
-- docker run -itd --rm --name router router
-- docker network connect --ip 10.0.10.254 clients router
-- docker network connect --ip 10.0.11.254 servers router
+- cd multicast
+- chmod +x setup_infra.sh
+- ./setup_infra.sh
 
 ### Crear y configurar cliente y servidor:
 - docker build -t base -f base_dockerfile/Dockerfile .
-- docker build -t client -f client/Dockerfile .
-- docker build -t server -f server/Dockerfile .
+- docker build -t client -f client/new_client.Dockerfile .
+- docker build -t server -f server/chord.Dockerfile .
 
 ### Correr el servidor:
 - docker run -it -v "$(pwd)/server/db:/app/db" --name server1 --cap-add NET_ADMIN --network servers server
